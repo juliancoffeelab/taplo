@@ -70,6 +70,9 @@ create_options!(
         /// where possible.
         pub inline_table_expand: bool,
 
+        /// Expand inline tables themselves to multiple lines.
+        pub inline_table_multiline: bool,
+
         /// Automatically collapse arrays if they
         /// fit in one line.
         ///
@@ -166,6 +169,7 @@ impl Default for Options {
             indent_tables: false,
             indent_entries: false,
             inline_table_expand: true,
+            inline_table_multiline: false,
             trailing_newline: true,
             allowed_blank_lines: 2,
             indent_string: "  ".into(),
@@ -861,18 +865,23 @@ fn format_inline_table(
     options: &Options,
     context: &Context,
 ) -> impl FormattedItem {
-    let mut formatted = String::new();
-    let mut comment = None;
-
     let mut context = context.clone();
     if context.force_multiline {
         context.force_multiline = options.inline_table_expand;
     }
+    let multiline = options.inline_table_multiline
+        && (is_inline_table_multiline(&node) || context.force_multiline);
     let context = &context;
-
     let child_count = node.children().count();
 
-    if node.children().count() == 0 {
+    if multiline {
+        return format_multiline_inline_table(node, options, context);
+    }
+
+    let mut formatted = String::new();
+    let mut comment = None;
+
+    if child_count == 0 {
         formatted = "{}".into();
     }
 
@@ -932,7 +941,7 @@ fn format_inline_table(
                     }
                     formatted += "}";
                 }
-                WHITESPACE | COMMA => {}
+                NEWLINE | WHITESPACE | COMMA => {}
                 COMMENT => {
                     debug_assert!(comment.is_none());
                     comment = Some(t.text().into());
@@ -944,6 +953,209 @@ fn format_inline_table(
 
     (node.into(), formatted, comment)
 }
+
+fn format_multiline_inline_table(
+    node: SyntaxNode,
+    options: &Options,
+    context: &Context,
+) -> (SyntaxElement, String, Option<String>) {
+    fn add_comments(
+        comments: &mut Vec<String>,
+        formatted: &mut String,
+        context: &Context,
+        options: &Options,
+    ) -> bool {
+        let were_comments = !comments.is_empty();
+
+        if were_comments && formatted.ends_with('{') {
+            *formatted += options.newline();
+        }
+
+        for (idx, comment) in comments.drain(0..).enumerate() {
+            if idx != 0 {
+                *formatted += options.newline();
+            }
+            formatted.extend(context.indent(options));
+            *formatted += &comment;
+        }
+
+        were_comments
+    }
+
+    fn add_inline_entries(
+        entry_group: &mut Vec<FormattedEntry>,
+        formatted: &mut String,
+        options: &Options,
+        context: &Context,
+    ) -> bool {
+        let were_entries = !entry_group.is_empty();
+
+        if options.reorder_inline_tables {
+            entry_group.sort();
+        }
+
+        if were_entries && formatted.ends_with('{') {
+            *formatted += options.newline();
+        }
+
+        let mut comment_count = 0;
+        let rows = entry_group
+            .drain(0..)
+            .map(|mut entry| {
+                entry.value += ",";
+
+                let mut row = Vec::with_capacity(5);
+                row.push(context.indent(options).collect::<String>());
+                row.push(entry.key);
+                row.push("=".to_string());
+                row.push(entry.value);
+
+                if let Some(c) = entry.comment {
+                    row.push(c);
+                    comment_count += 1;
+                }
+
+                row
+            })
+            .collect::<Vec<_>>();
+
+        let align_comments = options.should_align_comments(comment_count);
+        *formatted += &format_rows(
+            if !options.align_entries && !align_comments {
+                0..0
+            } else if !options.align_entries && align_comments {
+                3..usize::MAX
+            } else if options.align_entries && !align_comments {
+                0..3
+            } else {
+                0..usize::MAX
+            },
+            if options.compact_entries {
+                3..usize::MAX
+            } else {
+                1..usize::MAX
+            },
+            &rows,
+            options.newline(),
+            " ",
+        );
+
+        were_entries
+    }
+
+    let mut formatted = "{".to_string();
+    let mut trailing_comment = None;
+    let mut entry_group: Vec<FormattedEntry> = Vec::new();
+    let mut comment_group: Vec<String> = Vec::new();
+    let mut skip_newlines = 0;
+    let mut dangling_newline_count = 0;
+
+    let mut inner_context = context.clone();
+    inner_context.indent_level += 1;
+
+    for c in node.children_with_tokens() {
+        match c {
+            NodeOrToken::Node(n) => {
+                if add_comments(&mut comment_group, &mut formatted, &inner_context, options) {
+                    formatted += options.newline();
+                    skip_newlines = 0;
+                }
+
+                entry_group.push(format_entry(n, options, &inner_context));
+                skip_newlines += 1;
+            }
+            NodeOrToken::Token(t) => match t.kind() {
+                BRACE_START | WHITESPACE | COMMA => {}
+                BRACE_END => {
+                    if add_comments(&mut comment_group, &mut formatted, &inner_context, options) {
+                        formatted += options.newline();
+                        skip_newlines = 0;
+                    }
+
+                    add_inline_entries(
+                        &mut entry_group,
+                        &mut formatted,
+                        options,
+                        &inner_context,
+                    );
+
+                    if !formatted.ends_with('\n') {
+                        formatted += options.newline();
+                    }
+
+                    formatted.extend(context.indent(options));
+                    formatted += "}";
+                }
+                NEWLINE => {
+                    let mut newline_count = t.text().newline_count();
+
+                    match dangling_newlines(t.clone()) {
+                        Some(dnl) => {
+                            dangling_newline_count += dnl;
+                            continue;
+                        }
+                        None => {
+                            newline_count += dangling_newline_count;
+                            dangling_newline_count = 0;
+                        }
+                    }
+
+                    if newline_count > 1 {
+                        add_comments(&mut comment_group, &mut formatted, &inner_context, options);
+                        add_inline_entries(
+                            &mut entry_group,
+                            &mut formatted,
+                            options,
+                            &inner_context,
+                        );
+                        skip_newlines = 0;
+                    }
+
+                    formatted.extend(
+                        options.newlines(newline_count.saturating_sub(skip_newlines)),
+                    );
+                }
+                COMMENT => {
+                    let previous = t
+                        .siblings_with_tokens(rowan::Direction::Prev)
+                        .skip(1)
+                        .find(|s| s.kind() != WHITESPACE);
+
+                    if previous
+                        .as_ref()
+                        .map(|s| s.kind() == BRACE_END)
+                        .unwrap_or(false)
+                    {
+                        debug_assert!(trailing_comment.is_none());
+                        trailing_comment = Some(t.text().to_string());
+                        continue;
+                    }
+
+                    if add_inline_entries(
+                        &mut entry_group,
+                        &mut formatted,
+                        options,
+                        &inner_context,
+                    ) {
+                        formatted += options.newline();
+                        skip_newlines = 0;
+                    }
+
+                    comment_group.push(t.text().to_string());
+                    skip_newlines += 1;
+                }
+                _ => {}
+            },
+        }
+    }
+
+    (node.into(), formatted, trailing_comment)
+}
+
+fn is_inline_table_multiline(node: &SyntaxNode) -> bool {
+    node.descendants_with_tokens().any(|n| n.kind() == NEWLINE)
+}
+
 // Check whether the array spans multiple lines in its current form.
 fn is_array_multiline(node: &SyntaxNode) -> bool {
     node.descendants_with_tokens().any(|n| n.kind() == NEWLINE)

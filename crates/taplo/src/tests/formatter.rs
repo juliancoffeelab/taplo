@@ -973,6 +973,84 @@ very_long_inline_table = { array = ["aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa",
 }
 
 #[test]
+fn multiline_inline_table() {
+    let src = r#"
+cooldowns = {
+    foo = "foo",
+    bar = "bar",
+}
+"#;
+
+    let expected = r#"
+cooldowns = { foo = "foo", bar = "bar" }
+"#;
+
+    let formatted = crate::formatter::format(src, formatter::Options::default());
+
+    assert_format!(expected, &formatted);
+}
+
+#[test]
+fn multiline_inline_table_opt_in() {
+    let src = r#"
+cooldowns = {
+    foo = "foo",
+    bar = "bar",
+}
+"#;
+
+    let expected = r#"
+cooldowns = {
+  foo = "foo",
+  bar = "bar",
+}
+"#;
+
+    let formatted = crate::formatter::format(
+        src,
+        formatter::Options {
+            inline_table_multiline: true,
+            ..Default::default()
+        },
+    );
+
+    assert_format!(expected, &formatted);
+}
+
+#[test]
+fn expand_inline_table() {
+    let src = r#"
+very_long_inline_table = { array = ["aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa"] }
+"#;
+
+    let expected = r#"
+very_long_inline_table = {
+  array = [
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+    "aaaaa",
+  ],
+}
+"#;
+
+    let formatted = crate::formatter::format(
+        src,
+        formatter::Options {
+            inline_table_multiline: true,
+            ..Default::default()
+        },
+    );
+
+    assert_format!(expected, &formatted);
+}
+
+#[test]
 fn test_sorted_inline_tables() {
     let src = r#"
 foo = { b = 2, a = 1 }

@@ -20,6 +20,7 @@ In some environments (e.g., Visual Studio Code), one needs to reload the extensi
 |    compact_arrays     |                                       Omit whitespace padding inside single-line arrays.                                       |      true      |
 | compact_inline_tables |                                         Omit whitespace padding inside inline tables.                                          |     false      |
 |  inline_table_expand  |                                       Expand values (e.g. arrays) inside inline tables.                                        |      true      |
+| inline_table_multiline|                                  Expand inline tables to multiple lines when needed.                                           |     false      |
 |    compact_entries    |                                                  Omit whitespace around `=`.                                                   |     false      |
 |     column_width      |                          Target maximum column width after which arrays are expanded into new lines.                           |       80       |
 |     indent_tables     |                                            Indent subtables if they come in order.                                             |     false      |
