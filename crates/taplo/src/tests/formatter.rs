@@ -1018,6 +1018,32 @@ cooldowns = {
 }
 
 #[test]
+fn multiline_inline_table_respects_column_width() {
+    let src = r#"
+cooldowns = { first = "aaaaaaaaaa", second = "bbbbbbbbbb", third = "cccccccccc" }
+"#;
+
+    let expected = r#"
+cooldowns = {
+  first = "aaaaaaaaaa",
+  second = "bbbbbbbbbb",
+  third = "cccccccccc",
+}
+"#;
+
+    let formatted = crate::formatter::format(
+        src,
+        formatter::Options {
+            inline_table_multiline: true,
+            column_width: 40,
+            ..Default::default()
+        },
+    );
+
+    assert_format!(expected, &formatted);
+}
+
+#[test]
 fn expand_inline_table() {
     let src = r#"
 very_long_inline_table = { array = ["aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa", "aaaaa"] }

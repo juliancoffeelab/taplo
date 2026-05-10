@@ -869,15 +869,31 @@ fn format_inline_table(
     if context.force_multiline {
         context.force_multiline = options.inline_table_expand;
     }
-    let multiline = options.inline_table_multiline
+    let should_keep_multiline = options.inline_table_multiline
         && (is_inline_table_multiline(&node) || context.force_multiline);
     let context = &context;
-    let child_count = node.children().count();
 
-    if multiline {
+    if should_keep_multiline {
         return format_multiline_inline_table(node, options, context);
     }
 
+    let singleline = format_singleline_inline_table(node.clone(), options, context);
+
+    if options.inline_table_multiline
+        && inline_table_exceeds_column_width(&singleline.1, options, context)
+    {
+        return format_multiline_inline_table(node, options, context);
+    }
+
+    singleline
+}
+
+fn format_singleline_inline_table(
+    node: SyntaxNode,
+    options: &Options,
+    context: &Context,
+) -> (SyntaxElement, String, Option<String>) {
+    let child_count = node.children().count();
     let mut formatted = String::new();
     let mut comment = None;
 
@@ -952,6 +968,15 @@ fn format_inline_table(
     }
 
     (node.into(), formatted, comment)
+}
+
+fn inline_table_exceeds_column_width(
+    formatted: &str,
+    options: &Options,
+    context: &Context,
+) -> bool {
+    let indent_chars_count = context.indent_level * options.indent_string.chars().count();
+    indent_chars_count + formatted.chars().count() > options.column_width
 }
 
 fn format_multiline_inline_table(
@@ -1072,12 +1097,7 @@ fn format_multiline_inline_table(
                         skip_newlines = 0;
                     }
 
-                    add_inline_entries(
-                        &mut entry_group,
-                        &mut formatted,
-                        options,
-                        &inner_context,
-                    );
+                    add_inline_entries(&mut entry_group, &mut formatted, options, &inner_context);
 
                     if !formatted.ends_with('\n') {
                         formatted += options.newline();
@@ -1111,9 +1131,7 @@ fn format_multiline_inline_table(
                         skip_newlines = 0;
                     }
 
-                    formatted.extend(
-                        options.newlines(newline_count.saturating_sub(skip_newlines)),
-                    );
+                    formatted.extend(options.newlines(newline_count.saturating_sub(skip_newlines)));
                 }
                 COMMENT => {
                     let previous = t
@@ -1131,12 +1149,8 @@ fn format_multiline_inline_table(
                         continue;
                     }
 
-                    if add_inline_entries(
-                        &mut entry_group,
-                        &mut formatted,
-                        options,
-                        &inner_context,
-                    ) {
+                    if add_inline_entries(&mut entry_group, &mut formatted, options, &inner_context)
+                    {
                         formatted += options.newline();
                         skip_newlines = 0;
                     }
